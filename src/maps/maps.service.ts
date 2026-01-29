@@ -24,138 +24,107 @@ export class MapsService {
   private readonly logger = new Logger(MapsService.name);
   private seen = new Set<string>();
 
-  async getPlaces(query: string, city: string, limit = 5): Promise<Place[]> {
-    this.seen = new Set<string>();
+  async getPlaces(query: string, city: string, limit = 100): Promise<Place[]> {
     const places: Place[] = [];
-
+    const seenNames = new Set<string>();
+  
     const browser = await puppeteer.launch({
       headless: false,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--window-size=1920,1080",
-        "--start-maximized",
-        "--lang=en-US,en"
-      ]
+      args: ["--no-sandbox", "--start-maximized"]
     });
-
+  
     const page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
-
+    await page.setViewport({ width: 1280, height: 900 });
+  
     const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}?hl=en`;
-
+  
     try {
       await page.goto(url, { waitUntil: "networkidle2" });
-
-      try {
-        const btn = 'button[aria-label*="Accept all"], button[aria-label*="Agree"], button[aria-label*="Aceptar"]';
-        await page.waitForSelector(btn, { timeout: 5000 });
-        await page.click(btn);
-      } catch {
-        //
-      }
-
-      await page.waitForSelector('div[role="feed"]', { timeout: 15000 });
-
+  
+      await page.waitForSelector('div[role="feed"]', { timeout: 10000 });
+  
       let retryCount = 0;
-      while (places.length < limit && retryCount < 5) {
+      
+      while (places.length < limit && retryCount < 10) {
         const cards = await page.$$('div[role="article"]');
-        let newAdded = false;
-
+        let foundNewInThisScroll = false;
+  
         for (const card of cards) {
           if (places.length >= limit) break;
 
-          const name = await card.evaluate((el) => el.querySelector(".fontHeadlineSmall")?.textContent?.trim());
+          const name = await card.evaluate(el => el.querySelector(".fontHeadlineSmall")?.textContent?.trim());
 
-          if (name && !this.seen.has(name)) {
+          if (name && !seenNames.has(name)) {
             try {
-              await card.evaluate((el) => el.scrollIntoView({ behavior: "smooth", block: "center" }));
-              await new Promise((r) => setTimeout(r, 1000));
+              await card.evaluate(el => el.scrollIntoView());
+              await new Promise(r => setTimeout(r, 500));
+              
               await card.click();
-
-              await this.waitForPlaceChange(page);
-              await new Promise((r) => setTimeout(r, 2000));
+              
+              await page.waitForSelector('h1.DUwDvf', { timeout: 5000 });
+              await new Promise(r => setTimeout(r, 1500)); 
 
               const scraped = await this.extractDetails(page, city);
-
+              
               if (scraped.name) {
-                if (!scraped.email && scraped.website) {
+                if (scraped.website && scraped.website.length > 5) {
+                  this.logger.log(`Buscando email en: ${scraped.website}...`);
                   scraped.email = await this.scrapeEmailFromWebsite(browser, scraped.website);
                 }
-                this.seen.add(scraped.name);
+
+                seenNames.add(scraped.name);
                 places.push(scraped);
-                newAdded = true;
-                this.logger.log(`[${city}] Found: ${scraped.name}`);
+                foundNewInThisScroll = true;
+                this.logger.log(`[${city}] (${places.length}/${limit}) Extraído: ${scraped.name} ${scraped.email ? '📧' : ''}`);
               }
-            } catch {
+            } catch (e) {
+              this.logger.error(`Error procesando tarjeta: ${name}`);
               continue;
             }
           }
         }
-
-        if (!newAdded) retryCount++;
-        else retryCount = 0;
-
+  
         await this.scrollFeed(page);
+        
+        if (!foundNewInThisScroll) {
+          retryCount++;
+          this.logger.warn(`No se hallaron nuevos resultados, reintento ${retryCount}/10...`);
+        } else {
+          retryCount = 0;
+        }
       }
-
-      await browser.close();
+  
       return places;
-    } catch (error) {
-      this.logger.error(`Error in city ${city}: ${error}`);
+    } finally {
       await browser.close();
-      return [];
     }
   }
 
   private async extractDetails(page: Page, cityName: string): Promise<Place> {
-    const googleUrl = page.url();
-    return page.evaluate(
-      (url, city) => {
-        const clean = (text: string) =>
-          text
-            .replace(/[^\x20-\x7EÀ-ÿ]/g, "")
-            .replace(/\s+/g, " ")
-            .trim();
-        const getText = (sel: string) => {
-          const el = document.querySelector(sel) as HTMLElement;
-          return el ? clean(el.innerText) : "";
-        };
+    return page.evaluate((city) => {
+      const clean = (text: string) => {
+        if (!text) return "";
+        return text.replace(/[^\x20-\x7EÀ-ÿ]/g, "").replace(/\s+/g, " ").trim();
+      };
+      
+      const getText = (sel: string) => (document.querySelector(sel) as HTMLElement)?.innerText || "";
 
-        const name = getText("h1.DUwDvf") || getText(".lfPIob");
-        if (!name) return {} as Place;
-
-        const rows = document.querySelectorAll("table.eK0Z0c tr");
-        const hours = Array.from(rows)
-          .map((r) => clean((r as HTMLElement).innerText))
-          .join(" | ");
-        const priceSpan = Array.from(document.querySelectorAll("span")).find((s) =>
-          /^[$€£]{1,4}$/.test(s.innerText.trim())
-        );
-        const reviewsText = getText('span[aria-label*="reviews"]') || getText('button[aria-label*="reviews"]');
-
-        return {
-          city,
-          name,
-          category: getText('button[jsaction*="pane.rating.category"]'),
-          address: getText('button[data-item-id="address"]'),
-          phone: getText('button[data-item-id^="phone"]'),
-          website: (document.querySelector('a[data-item-id="authority"]') as HTMLAnchorElement)?.href || "",
-          social: "",
-          socialType: "",
-          email: "",
-          rating: getText("span.ceNzR") || getText("div.F7nice span"),
-          reviewsCount: reviewsText.replace(/[^0-9]/g, ""),
-          businessStatus: getText(".Z67o1c"),
-          workingHours: hours,
-          priceLevel: priceSpan ? priceSpan.innerText.trim() : "",
-          googleUrl: url
-        };
-      },
-      googleUrl,
-      cityName
-    );
+      return {
+        city,
+        name: clean(getText("h1.DUwDvf")),
+        category: clean(getText('button[jsaction*="category"]') || document.querySelector('.fontBodyMedium span button')?.textContent || ""),
+        address: clean(getText('button[data-item-id="address"]')),
+        phone: clean(getText('button[data-item-id^="phone"]')),
+        website: (document.querySelector('a[data-item-id="authority"]') as HTMLAnchorElement)?.href || "",
+        social: "", socialType: "", email: "",
+        rating: getText("span.ceNzR") || getText("div.F7nice span:first-child"),
+        reviewsCount: (getText('button[jsaction*="reviews"]') || "").replace(/[^0-9]/g, ""),
+        workingHours: Array.from(document.querySelectorAll('div[aria-label*="Hours"] table tr'))
+                           .map(r => clean((r as HTMLElement).innerText)).join(" | "),
+        priceLevel: clean(getText('span[aria-label*="Price"]')),
+        googleUrl: window.location.href
+      };
+    }, cityName);
   }
 
   private async waitForPlaceChange(page: Page) {
@@ -174,26 +143,87 @@ export class MapsService {
 
   private async scrollFeed(page: Page) {
     await page.evaluate(() => {
-      const el = document.querySelector('div[role="feed"]');
-      if (el) el.scrollBy(0, 1000);
+      const feed = document.querySelector('div[role="feed"]');
+      if (feed) {
+        feed.scrollTop = feed.scrollHeight;
+      }
     });
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 2500));
   }
 
   private async scrapeEmailFromWebsite(browser: Browser, url: string): Promise<string> {
-    if (!url || url.includes("facebook.com") || url.includes("instagram.com")) return "";
+    if (!url || url.includes("t.co") || url.includes("instagram.com")) return "";
+    
     const page = await browser.newPage();
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 8000 });
-      const email = await page.evaluate(() => {
-        const regex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/g;
-        return document.body.innerText.match(regex)?.[0] || "";
-      });
+      let targetUrl = url;
+
+      if (url.includes("facebook.com")) {
+        targetUrl = url.replace("www.facebook.com", "m.facebook.com");
+        if (!targetUrl.includes("about")) {
+          targetUrl = targetUrl.endsWith('/') ? `${targetUrl}about` : `${targetUrl}/about`;
+        }
+        await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1");
+      } else {
+        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+      }
+
+      await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 20000 });
+
+      const extractEmails = async () => {
+        return await page.evaluate(() => {
+          const regex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,4}/g;
+          const bodyText = document.body.innerText;
+          const htmlContent = document.documentElement.innerHTML;
+          
+          const raw = [...(bodyText.match(regex) || []), ...(htmlContent.match(regex) || [])];
+          
+          const blacklist = [
+            '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.js', '.css', 
+            'example', 'domain', 'sentry', 'wix', 'bootstrap', 'jquery', 'google', 'email@'
+          ];
+
+          const filtered = raw.filter(e => {
+            const low = e.toLowerCase();
+            return !blacklist.some(bad => low.includes(bad)) && low.length > 6;
+          });
+
+          return filtered.length > 0 ? filtered[0] : "";
+        });
+      };
+
+      let email = await extractEmails();
+
+      if (!email && !url.includes("facebook.com")) {
+        const contactHref = await page.evaluate(() => {
+          const a = Array.from(document.querySelectorAll('a')).find(el => 
+            /contacto|contact|about|nosotros/i.test(el.innerText) || /contact/i.test(el.href)
+          );
+          return a ? a.href : null;
+        });
+
+        if (contactHref) {
+          await page.goto(contactHref, { waitUntil: "networkidle2", timeout: 15000 });
+          email = await extractEmails();
+        }
+      }
+
       await page.close();
-      return email;
-    } catch {
+      return email.toLowerCase().trim();
+    } catch (e) {
       await page.close();
       return "";
     }
   }
+
+
+  
+
+
+
+
+
+
+
+
 }

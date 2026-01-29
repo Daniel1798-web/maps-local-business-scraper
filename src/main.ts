@@ -11,10 +11,10 @@ async function bootstrap() {
   const mapsService = app.get(MapsService);
   const csvService = app.get(CsvMapsService);
 
-  const COUNTRY = "EEUU";
-  const CATEGORY = "Restaurants";
-  const CITIES = ["orlando", "Miami", "Los Angeles"];
-  const LIMIT_PER_CITY = 5;
+  const COUNTRY = "Argentina";
+  const CATEGORY = "contadores";
+  const CITIES = ["Cordoba"];
+  const LIMIT_PER_CITY = 50;
 
   const sessionFileName = `Leads_${COUNTRY}_${CATEGORY}`.replace(/\s/g, "_");
 
