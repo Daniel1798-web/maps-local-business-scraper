@@ -7,93 +7,151 @@ export interface Place {
   category?: string;
   address?: string;
   phone?: string;
-  website: string;
-  social: string;
-  socialType: string;
+  website?: string;
   email?: string;
   rating?: string;
   reviewsCount?: string;
-  businessStatus?: string;
+  
+  facebook?: string;
+  instagram?: string;
+  latitude?: string;
+  longitude?: string;
   googleUrl?: string;
+
+  isClaimed?: string;
+  attributes?: string;
+  topReview?: string;
   workingHours?: string;
-  priceLevel?: string;
+  imageUrl?: string;
 }
 
 @Injectable()
 export class MapsService {
   private readonly logger = new Logger(MapsService.name);
-  private seen = new Set<string>();
 
-  async getPlaces(query: string, city: string, limit = 100): Promise<Place[]> {
+  private delay(ms: number) {
+    return new Promise(res => setTimeout(res, ms));
+  }
+
+  async getPlaces(query: string, city: string, limit = 20): Promise<Place[]> {
     const places: Place[] = [];
     const seenNames = new Set<string>();
-  
+    const seenAddresses = new Set<string>();
+
     const browser = await puppeteer.launch({
       headless: false,
-      args: ["--no-sandbox", "--start-maximized"]
+      args: ["--no-sandbox", "--start-maximized", "--lang=es-ES"]
     });
-  
+
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 900 });
-  
-    const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}?hl=en`;
-  
+
+    const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}?hl=es`;
+
     try {
       await page.goto(url, { waitUntil: "networkidle2" });
-  
-      await page.waitForSelector('div[role="feed"]', { timeout: 10000 });
-  
-      let retryCount = 0;
       
-      while (places.length < limit && retryCount < 10) {
+      let scrollAttempts = 0;
+      const maxScrolls = 10;
+      
+      while (places.length < limit && scrollAttempts < maxScrolls) {
         const cards = await page.$$('div[role="article"]');
-        let foundNewInThisScroll = false;
-  
+        let foundNew = false;
+
         for (const card of cards) {
           if (places.length >= limit) break;
 
-          const name = await card.evaluate(el => el.querySelector(".fontHeadlineSmall")?.textContent?.trim());
+          const cardData = await card.evaluate(el => {
+            const name = el.querySelector(".fontHeadlineSmall")?.textContent?.trim() || "";
+            const address = el.querySelector('div.W4Efsd span:last-child')?.textContent?.trim() || "";
+            return { name, address };
+          });
 
-          if (name && !seenNames.has(name)) {
+          const { name, address } = cardData;
+          
+          const normalizedName = name
+            .toLowerCase()
+            .replace(/[^\w\s]/g, '')
+            .trim();
+          
+          const normalizedAddress = address
+            .toLowerCase()
+            .replace(/[^\w\s]/g, '')
+            .trim();
+          
+          const uniqueKey = `${normalizedName}|${normalizedAddress}`;
+          
+          if (!name) continue;
+          
+          if (seenNames.has(normalizedName) || (normalizedAddress && seenAddresses.has(uniqueKey))) {
+            this.logger.debug(`Saltando duplicado: ${name}`);
+            continue;
+          }
+
+          try {
+            await card.evaluate(el => el.scrollIntoView());
+            await this.delay(500);
+            await card.click();
+
+            await page.waitForSelector('h1.DUwDvf', { timeout: 7000 });
+            
             try {
-              await card.evaluate(el => el.scrollIntoView());
-              await new Promise(r => setTimeout(r, 500));
-              
-              await card.click();
-              
-              await page.waitForSelector('h1.DUwDvf', { timeout: 5000 });
-              await new Promise(r => setTimeout(r, 1500)); 
-
-              const scraped = await this.extractDetails(page, city);
-              
-              if (scraped.name) {
-                if (scraped.website && scraped.website.length > 5) {
-                  this.logger.log(`Buscando email en: ${scraped.website}...`);
-                  scraped.email = await this.scrapeEmailFromWebsite(browser, scraped.website);
-                }
-
-                seenNames.add(scraped.name);
-                places.push(scraped);
-                foundNewInThisScroll = true;
-                this.logger.log(`[${city}] (${places.length}/${limit}) Extraído: ${scraped.name} ${scraped.email ? '📧' : ''}`);
+              const expandBtn = await page.$('button[jsaction*="review.expand"], button[aria-label*="Más"]');
+              if (expandBtn) {
+                await expandBtn.click();
+                await this.delay(500);
               }
-            } catch (e) {
-              this.logger.error(`Error procesando tarjeta: ${name}`);
+            } catch (e) { }
+            
+            await this.delay(1200);
+
+            const scraped = await this.extractDetails(page, city);
+            
+            const scrapedNormalizedName = scraped.name
+              .toLowerCase()
+              .replace(/[^\w\s]/g, '')
+              .trim();
+            
+            const scrapedNormalizedAddress = (scraped.address || "")
+              .toLowerCase()
+              .replace(/[^\w\s]/g, '')
+              .trim();
+            
+            const scrapedKey = `${scrapedNormalizedName}|${scrapedNormalizedAddress}`;
+            
+            if (seenNames.has(scrapedNormalizedName) || (scrapedNormalizedAddress && seenAddresses.has(scrapedKey))) {
+              this.logger.warn(`Duplicado detectado después de scraping: ${scraped.name}`);
               continue;
             }
+            
+            if (scraped.website && !scraped.website.includes("instagram.com") && !scraped.website.includes("facebook.com")) {
+              scraped.email = await this.scrapeEmailFromWebsite(browser, scraped.website);
+            }
+
+            seenNames.add(scrapedNormalizedName);
+            if (scrapedNormalizedAddress) {
+              seenAddresses.add(scrapedKey);
+            }
+            
+            places.push(scraped);
+            foundNew = true;
+            this.logger.log(`[${city}] Extraído (${places.length}/${limit}): ${scraped.name}`);
+          } catch (e) { 
+            this.logger.error(`Error procesando ${name}: ${e}`);
+            continue; 
           }
         }
-  
-        await this.scrollFeed(page);
-        
-        if (!foundNewInThisScroll) {
-          retryCount++;
-          this.logger.warn(`No se hallaron nuevos resultados, reintento ${retryCount}/10...`);
-        } else {
-          retryCount = 0;
+
+        if (!foundNew) {
+          await this.scrollFeed(page);
+          scrollAttempts++;
+          this.logger.debug(`Scroll ${scrollAttempts}/${maxScrolls} - Sin nuevos resultados`);
+        } else { 
+          scrollAttempts = 0;
         }
       }
-  
+      
+      this.logger.log(`Extracción finalizada: ${places.length} lugares únicos encontrados`);
       return places;
     } finally {
       await browser.close();
@@ -102,128 +160,176 @@ export class MapsService {
 
   private async extractDetails(page: Page, cityName: string): Promise<Place> {
     return page.evaluate((city) => {
-      const clean = (text: string) => {
-        if (!text) return "";
-        return text.replace(/[^\x20-\x7EÀ-ÿ]/g, "").replace(/\s+/g, " ").trim();
-      };
+      const getTxt = (sel: string) => (document.querySelector(sel) as HTMLElement)?.innerText?.trim() || "";
+      const clean = (str: string) => str.replace(/[\x00-\x1F\x7F-\x9F]/g, "").trim();
+
+      const website = (document.querySelector('a[data-item-id="authority"]') as HTMLAnchorElement)?.href || "";
+      const url = window.location.href;
       
-      const getText = (sel: string) => (document.querySelector(sel) as HTMLElement)?.innerText || "";
+      let attributes = "";
+      const featureButtons = Array.from(document.querySelectorAll('button.hh2c6'))
+        .map(btn => (btn as HTMLElement).innerText?.trim())
+        .filter(t => t && t.length > 2 && t.length < 50)
+        .join(" | ");
+      
+      const serviceLabels = Array.from(document.querySelectorAll('div[class*="accessibility"], div[role="img"][aria-label]'))
+        .map(el => el.getAttribute('aria-label') || '')
+        .filter(t => t && t.length > 3 && t.length < 60)
+        .join(" | ");
+      
+      const glanceSection = document.querySelector('div[aria-label*="vistazo"], div[aria-label*="glance"]');
+      const glanceItems = glanceSection 
+        ? Array.from(glanceSection.querySelectorAll('span'))
+            .map(s => (s as HTMLElement).innerText?.trim())
+            .filter(t => t && t.length > 3)
+            .join(" | ")
+        : "";
+      
+      const iconLabels = Array.from(document.querySelectorAll('div.AeaXub span.fontBodyMedium'))
+        .map(s => (s as HTMLElement).innerText?.trim())
+        .filter(t => t && t.length > 2 && t.length < 40)
+        .join(" | ");
+      
+      attributes = [featureButtons, serviceLabels, glanceItems, iconLabels]
+        .filter(a => a.length > 0)
+        .join(" | ");
+
+      let topReview = "";
+      const reviewElement = document.querySelector('.MyEned, .wiI7pd, .review-full-text') as HTMLElement;
+      if (reviewElement) {
+        topReview = clean(reviewElement.innerText);
+      } else {
+        const firstReview = document.querySelector('[data-review-id] span[class*="review"], .rsqaWe') as HTMLElement;
+        topReview = firstReview ? clean(firstReview.innerText) : "";
+      }
+      topReview = topReview.replace(/\s*Más\s*$/, '').trim();
+
+      const isClaimed = !document.body.innerText.includes("Reclamar este negocio") && 
+                        !document.body.innerText.includes("Own this business") &&
+                        !document.body.innerText.includes("Claim this business");
+
+      const hours = Array.from(document.querySelectorAll('table.CsEnBe tr'))
+        .map(tr => (tr as HTMLElement).innerText.replace(/\s+/g, " "))
+        .join(" ; ");
+
+      let imageUrl = "";
+      const mainPhoto = document.querySelector('button[jsaction*="pane.place.photo"] img') as HTMLImageElement;
+      if (mainPhoto && mainPhoto.src && mainPhoto.src.includes('googleusercontent')) {
+        imageUrl = mainPhoto.src;
+      }
+
+      if (!imageUrl) {
+        const carouselImg = document.querySelector('div.eKbjU img, button.aoRNLd img') as HTMLImageElement;
+        if (carouselImg && carouselImg.src && carouselImg.src.includes('googleusercontent')) {
+          imageUrl = carouselImg.src;
+        }
+      }
+
+      if (!imageUrl) {
+        const allImages = Array.from(document.querySelectorAll('img'))
+          .filter(img => {
+            const src = (img as HTMLImageElement).src || '';
+            const parent = img.parentElement;
+            return (
+              (src.includes('googleusercontent.com') || src.includes('ggpht.com')) &&
+              !src.includes('gstatic.com/images') &&
+              !src.includes('maps/api/js') &&
+              (img as HTMLImageElement).width > 100 &&
+              !parent?.getAttribute('aria-label')?.includes('Mapa')
+            );
+          });
+        
+        if (allImages.length > 0) {
+          imageUrl = (allImages[0] as HTMLImageElement).src;
+        }
+      }
+
+      if (imageUrl) {
+        const baseUrl = imageUrl.split('=')[0];
+        imageUrl = baseUrl + '=s1000';
+      }
+
+      const coords = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      const allLinks = Array.from(document.querySelectorAll('a[href]')).map(a => (a as HTMLAnchorElement).href);
+
+      let reviewsCount = "0";
+      const reviewButton = document.querySelector('button[jsaction*="reviews"]') as HTMLElement;
+      if (reviewButton) {
+        const text = reviewButton.innerText || "";
+        const match = text.match(/\(?([\d,\.]+)\)?/);
+        if (match) {
+          reviewsCount = match[1].replace(/[,\.]/g, "");
+        }
+      }
+      
+      if (reviewsCount === "0") {
+        const ratingArea = document.querySelector('div.F7nice') as HTMLElement;
+        if (ratingArea) {
+          const spans = ratingArea.querySelectorAll('span');
+          for (const span of spans) {
+            const text = (span as HTMLElement).innerText || "";
+            const match = text.match(/\(?([\d,\.]+)\)?/);
+            if (match && !text.includes("★") && !text.includes(",")) {
+              reviewsCount = match[1].replace(/[,\.]/g, "");
+              break;
+            }
+          }
+        }
+      }
+
+      if (reviewsCount === "0") {
+        const elements = document.querySelectorAll('[aria-label*="reseña"], [aria-label*="review"]');
+        for (const el of elements) {
+          const ariaLabel = el.getAttribute('aria-label') || "";
+          const match = ariaLabel.match(/([\d,\.]+)\s*(reseña|review)/i);
+          if (match) {
+            reviewsCount = match[1].replace(/[,\.]/g, "");
+            break;
+          }
+        }
+      }
 
       return {
         city,
-        name: clean(getText("h1.DUwDvf")),
-        category: clean(getText('button[jsaction*="category"]') || document.querySelector('.fontBodyMedium span button')?.textContent || ""),
-        address: clean(getText('button[data-item-id="address"]')),
-        phone: clean(getText('button[data-item-id^="phone"]')),
-        website: (document.querySelector('a[data-item-id="authority"]') as HTMLAnchorElement)?.href || "",
-        social: "", socialType: "", email: "",
-        rating: getText("span.ceNzR") || getText("div.F7nice span:first-child"),
-        reviewsCount: (getText('button[jsaction*="reviews"]') || "").replace(/[^0-9]/g, ""),
-        workingHours: Array.from(document.querySelectorAll('div[aria-label*="Hours"] table tr'))
-                           .map(r => clean((r as HTMLElement).innerText)).join(" | "),
-        priceLevel: clean(getText('span[aria-label*="Price"]')),
-        googleUrl: window.location.href
+        name: clean(getTxt("h1.DUwDvf")),
+        category: clean(getTxt('button[jsaction*="category"]')),
+        address: clean(getTxt('button[data-item-id="address"]')),
+        phone: clean(getTxt('button[data-item-id^="phone"]')),
+        website: website.includes("instagram") || website.includes("facebook") ? "" : website,
+        instagram: allLinks.find(l => l.includes("instagram.com")) || (website.includes("instagram.com") ? website : ""),
+        facebook: allLinks.find(l => l.includes("facebook.com")) || (website.includes("facebook.com") ? website : ""),
+        rating: getTxt("span.ceNzR") || getTxt("div.F7nice span"),
+        reviewsCount,
+        topReview,
+        attributes,
+        isClaimed: isClaimed ? "Yes" : "No",
+        workingHours: hours,
+        imageUrl,
+        latitude: coords?.[1] || "",
+        longitude: coords?.[2] || "",
+        googleUrl: url
       };
     }, cityName);
-  }
-
-  private async waitForPlaceChange(page: Page) {
-    try {
-      await page.waitForFunction(
-        () => {
-          const title = document.querySelector("h1.DUwDvf")?.textContent?.trim();
-          return title && title.length > 0;
-        },
-        { timeout: 5000 }
-      );
-    } catch {
-      //
-    }
   }
 
   private async scrollFeed(page: Page) {
     await page.evaluate(() => {
       const feed = document.querySelector('div[role="feed"]');
-      if (feed) {
-        feed.scrollTop = feed.scrollHeight;
-      }
+      if (feed) feed.scrollBy(0, 600);
     });
-    await new Promise(r => setTimeout(r, 2500));
+    await this.delay(2000);
   }
 
   private async scrapeEmailFromWebsite(browser: Browser, url: string): Promise<string> {
-    if (!url || url.includes("t.co") || url.includes("instagram.com")) return "";
-    
     const page = await browser.newPage();
     try {
-      let targetUrl = url;
-
-      if (url.includes("facebook.com")) {
-        targetUrl = url.replace("www.facebook.com", "m.facebook.com");
-        if (!targetUrl.includes("about")) {
-          targetUrl = targetUrl.endsWith('/') ? `${targetUrl}about` : `${targetUrl}/about`;
-        }
-        await page.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1");
-      } else {
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-      }
-
-      await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 20000 });
-
-      const extractEmails = async () => {
-        return await page.evaluate(() => {
-          const regex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,4}/g;
-          const bodyText = document.body.innerText;
-          const htmlContent = document.documentElement.innerHTML;
-          
-          const raw = [...(bodyText.match(regex) || []), ...(htmlContent.match(regex) || [])];
-          
-          const blacklist = [
-            '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.js', '.css', 
-            'example', 'domain', 'sentry', 'wix', 'bootstrap', 'jquery', 'google', 'email@'
-          ];
-
-          const filtered = raw.filter(e => {
-            const low = e.toLowerCase();
-            return !blacklist.some(bad => low.includes(bad)) && low.length > 6;
-          });
-
-          return filtered.length > 0 ? filtered[0] : "";
-        });
-      };
-
-      let email = await extractEmails();
-
-      if (!email && !url.includes("facebook.com")) {
-        const contactHref = await page.evaluate(() => {
-          const a = Array.from(document.querySelectorAll('a')).find(el => 
-            /contacto|contact|about|nosotros/i.test(el.innerText) || /contact/i.test(el.href)
-          );
-          return a ? a.href : null;
-        });
-
-        if (contactHref) {
-          await page.goto(contactHref, { waitUntil: "networkidle2", timeout: 15000 });
-          email = await extractEmails();
-        }
-      }
-
-      await page.close();
-      return email.toLowerCase().trim();
-    } catch (e) {
-      await page.close();
-      return "";
-    }
+      await page.setRequestInterception(true);
+      page.on('request', r => ['image', 'stylesheet', 'font'].includes(r.resourceType()) ? r.abort() : r.continue());
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
+      return await page.evaluate(() => {
+        const regex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/g;
+        return (document.documentElement.innerHTML.match(regex) || [])[0] || "";
+      });
+    } catch { return ""; } finally { await page.close(); }
   }
-
-
-  
-
-
-
-
-
-
-
-
 }
