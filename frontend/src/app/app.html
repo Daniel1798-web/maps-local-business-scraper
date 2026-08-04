@@ -1,38 +1,93 @@
 <div class="container">
 
-  <h1>Maps Business Scraper</h1>
+  <header class="page-header">
+    <p class="eyebrow">Panel de extracción</p>
+    <h1>Maps Business Scraper</h1>
+    <p class="subtitle">Buscá negocios locales en Google Maps y exportá los resultados a Excel.</p>
+  </header>
 
-  <div class="form">
+  <section class="search-panel">
 
-    <input
-      [(ngModel)]="country"
-      placeholder="País">
+    <div class="search-panel-header">
+      <h2>Parámetros de búsqueda</h2>
+      <span class="search-panel-hint">Completá los campos y presioná Buscar</span>
+    </div>
 
-    <input
-      [(ngModel)]="city"
-      placeholder="Ciudad">
+    <div class="search-grid">
 
-    <input
-      [(ngModel)]="category"
-      placeholder="Categoría">
+      <label class="field">
+        <span class="field-label">País</span>
+        <div class="field-control">
+          <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 21c-4.5-4.2-7-8-7-11a7 7 0 0 1 14 0c0 3-2.5 6.8-7 11Z" />
+            <circle cx="12" cy="10" r="2.5" />
+          </svg>
+          <input [(ngModel)]="country" placeholder="Ej: Argentina">
+        </div>
+      </label>
 
-    <input
-      type="number"
-      [(ngModel)]="limit"
-      placeholder="Cantidad">
+      <label class="field">
+        <span class="field-label">Ciudad</span>
+        <div class="field-control">
+          <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 21h18" />
+            <path d="M5 21V7l7-4 7 4v14" />
+            <path d="M9 21v-6h6v6" />
+          </svg>
+          <input [(ngModel)]="city" placeholder="Ej: Córdoba">
+        </div>
+      </label>
 
-    <button (click)="buscar()" [disabled]="loading()">
-      {{ loading() ? 'Buscando...' : 'Buscar' }}
-    </button>
+      <label class="field">
+        <span class="field-label">Categoría</span>
+        <div class="field-control">
+          <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20.6 12.3 12.7 20.2a2 2 0 0 1-2.8 0l-6.1-6.1a2 2 0 0 1 0-2.8L11.7 3.4A2 2 0 0 1 13.1 3H19a2 2 0 0 1 2 2v5.9a2 2 0 0 1-.4 1.4Z" />
+            <circle cx="16" cy="8" r="1.2" />
+          </svg>
+          <input [(ngModel)]="category" placeholder="Ej: bares, farmacias">
+        </div>
+      </label>
 
-    <button
-      class="btn-secondary"
-      (click)="exportarExcel()"
-      [disabled]="loading() || results().length === 0">
-      Exportar a Excel
-    </button>
+      <label class="field field-narrow">
+        <span class="field-label">Cantidad</span>
+        <div class="field-control">
+          <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+          </svg>
+          <input type="number" min="1" [(ngModel)]="limit" placeholder="10">
+        </div>
+      </label>
 
-  </div>
+    </div>
+
+    <div class="search-actions">
+
+      <button class="btn btn-primary" (click)="buscar()" [disabled]="loading()">
+        @if (!loading()) {
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+        }
+        {{ loading() ? 'Buscando...' : 'Buscar negocios' }}
+      </button>
+
+      <button
+        class="btn btn-outline"
+        (click)="exportarExcel()"
+        [disabled]="loading() || results().length === 0">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 21h14" />
+        </svg>
+        Exportar a Excel
+      </button>
+
+    </div>
+
+  </section>
 
   @if (loading()) {
     <div class="loader-container">
@@ -109,7 +164,6 @@
               <a [href]="'mailto:' + item.email" class="link-chip">{{ item.email }}</a>
             }
           </div>
-
 
           <a [href]="item.googleUrl" target="_blank" class="maps-link">
             Abrir en Google Maps
