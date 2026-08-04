@@ -1,0 +1,126 @@
+<div class="container">
+
+  <h1>Maps Business Scraper</h1>
+
+  <div class="form">
+
+    <input
+      [(ngModel)]="country"
+      placeholder="País">
+
+    <input
+      [(ngModel)]="city"
+      placeholder="Ciudad">
+
+    <input
+      [(ngModel)]="category"
+      placeholder="Categoría">
+
+    <input
+      type="number"
+      [(ngModel)]="limit"
+      placeholder="Cantidad">
+
+    <button (click)="buscar()" [disabled]="loading()">
+      {{ loading() ? 'Buscando...' : 'Buscar' }}
+    </button>
+
+    <button
+      class="btn-secondary"
+      (click)="exportarExcel()"
+      [disabled]="loading() || results().length === 0">
+      Exportar a Excel
+    </button>
+
+  </div>
+
+  @if (loading()) {
+    <div class="loader-container">
+      <div class="loader"></div>
+      <p>Buscando negocios...</p>
+    </div>
+  }
+
+  @if (!loading() && results().length > 0) {
+    <p class="results-count">{{ results().length }} resultados encontrados</p>
+  }
+
+  <div class="cards">
+
+    @for (item of results(); track item.googleUrl) {
+
+      <div class="card">
+
+        @if (item.photoUrl) {
+          <div class="card-photo">
+            <img [src]="item.photoUrl" [alt]="item.name" loading="lazy">
+          </div>
+        }
+
+        <div class="card-body">
+
+          <div class="card-header">
+            <h2>{{ item.name }}</h2>
+            <span class="badge" [ngClass]="estadoClass(item.businessStatus)">
+              {{ estadoLabel(item.businessStatus) }}
+            </span>
+          </div>
+
+          <p class="category">{{ item.category }}</p>
+
+          <div class="rating-row">
+            <span class="rating-value">{{ item.rating || '-' }}</span>
+            <span class="price-level">{{ item.priceLevel }}</span>
+          </div>
+
+          <div class="info-block">
+            <p><strong>Dirección:</strong> {{ item.address || '-' }}</p>
+            <p><strong>Teléfono:</strong> {{ item.phone || '-' }}</p>
+            <p><strong>Horario:</strong> {{ item.workingHours || '-' }}</p>
+          </div>
+
+          @if (item.description) {
+            <p class="description">{{ item.description }}</p>
+          }
+
+          <div class="links-row">
+            @if (item.website) {
+              <a [href]="item.website" target="_blank" class="link-chip">Sitio web</a>
+            }
+            @if (item.instagram) {
+              <a [href]="item.instagram" target="_blank" class="link-chip">Instagram</a>
+            }
+            @if (item.facebook) {
+              <a [href]="item.facebook" target="_blank" class="link-chip">Facebook</a>
+            }
+            @if (item.twitter) {
+              <a [href]="item.twitter" target="_blank" class="link-chip">Twitter</a>
+            }
+            @if (item.linkedin) {
+              <a [href]="item.linkedin" target="_blank" class="link-chip">LinkedIn</a>
+            }
+            @if (item.tiktok) {
+              <a [href]="item.tiktok" target="_blank" class="link-chip">TikTok</a>
+            }
+            @if (item.whatsapp) {
+              <a [href]="item.whatsapp" target="_blank" class="link-chip">WhatsApp</a>
+            }
+            @if (item.email) {
+              <a [href]="'mailto:' + item.email" class="link-chip">{{ item.email }}</a>
+            }
+          </div>
+
+
+          <a [href]="item.googleUrl" target="_blank" class="maps-link">
+            Abrir en Google Maps
+          </a>
+
+        </div>
+
+      </div>
+
+    }
+
+  </div>
+
+</div>
