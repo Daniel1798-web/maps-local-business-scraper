@@ -1,164 +1,120 @@
-# Google Maps Business Scraper (NestJS + Puppeteer)
+# Maps Local Business Scraper
 
-This repository provides a **Google Maps business scraper** built with **NestJS** and **Puppeteer**. It is designed to collect structured lead data from Google Maps at scale, exporting the results into clean CSV files ready for outreach, analysis, or enrichment.
+A desktop application for extracting business information from Google Maps using **Angular**, **NestJS**, and **Electron**.
 
-The project focuses on **reliability**, **deduplication**, and **global usability**, avoiding region‑specific assumptions so it can be used anywhere in the world.
+## Features
 
----
-
-## What This Project Does
-
-* Scrapes business listings directly from Google Maps search results
-* Extracts the maximum amount of public business data available
-* Automatically detects and separates:
-
-* Official websites
-* Social media links (Instagram, Facebook, WhatsApp)
-* Deduplicates businesses to avoid repeated entries
-* Generates **one CSV file per search query** (no overwrites)
-* Handles Google Maps scroll freezes and slow UI updates
-* Works with any country or city without manual coordinates
+- Search businesses by country, city, and category.
+- Export search results.
+- Desktop application for Windows.
+- Open source.
 
 ---
 
-## Data Collected Per Business
+# Download
 
-Each scraped business produces a structured record with the following fields:
+If you only want to use the application, download the latest Windows release from the project's Releases page:
 
-* `name`
-* `category`
-* `address`
-* `phone`
-* `website` (only dedicated websites)
-* `social` (Instagram / Facebook / WhatsApp links)
-* `socialType`
-* `email` (best‑effort extraction)
-* `rating`
-* `reviewsCount`
+👉 https://github.com/Daniel1798-web/maps-local-business-scraper/releases
 
-All data is exported to CSV using proper escaping.
+Download either the installer or the portable version and run the application.
 
 ---
 
-## How Deduplication Works
-
-Google Maps frequently repeats businesses across scrolls and categories. This scraper prevents duplicates by generating a **fingerprint** per business using the most reliable identifier available:
-
-1. Phone number (highest priority)
-2. Website URL
-3. Social link
-4. Fallback: name + address
-
-Only unique businesses are stored and exported.
-
----
-
-## How Scraping Is Stabilized
-
-This project avoids brittle `setTimeout`‑based scraping. Instead it:
-
-* Waits for the business panel to actually change before scraping
-* Detects frozen scroll states and forces wheel events
-* Scrolls incrementally until no new results appear
-* Stops safely when Google Maps stops loading new cards
-
-This makes the scraper stable for **hundreds or thousands of listings per run**.
-
----
-
-## CSV Output
-
-* All CSV files are written to the `/output` directory
-* Each search query generates its own file
-* Filenames include:
-
-  * The sanitized search query
-  * A timestamp
-
-Example:
-
-```
-output/leads_panaderia_en_cordoba_argentina_2026-01-02T14-32-10.csv
-```
-
-This ensures no data loss between runs or categories.
-
----
-
-## Configuration (main.ts)
-
-You control scraping behavior from `main.ts`:
-
-```ts
-const COUNTRY = "Argentina";
-const LOCATION = "Córdoba";
-
-const BUSINESS_QUERIES = [
-  "peluquería",
-  "panadería",
-  "ferretería",
-  "taller mecánico",
-  "kiosco"
-];
-
-const LIMIT_PER_QUERY = 100;
-```
-
-* Change `COUNTRY` and `LOCATION` to scrape anywhere in the world
-* Add or remove business categories freely
-* Increase limits depending on your machine and patience
-
-No neighborhood names, coordinates, or manual map navigation required.
-
----
+# Running the Project from Source
 
 ## Requirements
 
-* Node.js 18+
-* npm
-* Google Chrome (or Chromium)
+- Node.js 22 or later
+- npm
 
----
-
-## Installation
+## 1. Clone the repository
 
 ```bash
+git clone https://github.com/Daniel1798-web/maps-local-business-scraper.git
+
+cd maps-local-business-scraper
+```
+
+## 2. Install dependencies
+
+### Backend
+
+```bash
+cd backend
 npm install
 ```
 
----
-
-## Run the Scraper
+### Frontend
 
 ```bash
-npm run start
+cd ../frontend
+npm install
 ```
 
-A visible browser window will open (headful mode) so you can monitor activity.
+## 3. Build the backend
+
+```bash
+cd backend
+npm run build
+```
+
+## 4. Start the backend
+
+```bash
+npm run start:prod
+```
+
+The API will be available at:
+
+```
+http://localhost:3000
+```
+
+## 5. Start the frontend
+
+Open a new terminal and run:
+
+```bash
+cd frontend
+npm start
+```
+
+The frontend will be available at:
+
+```
+http://localhost:4200
+```
 
 ---
 
-## Important Notes
+# Project Structure
 
-* This project scrapes **publicly available data** only
-* Google Maps may change DOM selectors at any time
-* Use responsibly and respect local laws and Google’s terms
-* This tool is intended for **research, lead generation, and internal tooling**
+```
+maps-local-business-scraper/
 
----
+backend/
+├── src/
+└── dist/
 
-## Future Improvements
-
-* Headless + stealth mode
-* Automatic geographic tiling for very large countries
-* Proxy rotation
-* Export to JSON / database
-* Email enrichment via external APIs
+frontend/
+├── src/
+├── electron/
+└── dist/
+```
 
 ---
 
-## Disclaimer
+# Technologies
 
-This project is provided for educational and internal use. The author is not responsible for misuse or violations of third‑party terms of service.
+- Angular 21
+- NestJS
+- Electron
+- Electron Builder
+- TypeScript
 
 ---
+
+# License
+
+This project is licensed under the MIT License.
